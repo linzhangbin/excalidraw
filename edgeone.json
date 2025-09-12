@@ -1,8 +1,6 @@
 {
-  "name": "excalidraw-app",
   "outputDirectory": "excalidraw-app/build",
   "installCommand": "yarn install",
-   "outputDirectory": "./build",
   "headers": [
     {
       "source": "/(.*)",
