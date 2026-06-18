@@ -4,7 +4,6 @@ import React from "react";
 import {
   CLASSES,
   DEFAULT_SIDEBAR,
-  MQ_MIN_WIDTH_DESKTOP,
   TOOL_TYPE,
   arrayToMap,
   capitalizeString,
@@ -21,7 +20,6 @@ import type { NonDeletedExcalidrawElement } from "@excalidraw/element/types";
 
 import { actionToggleStats } from "../actions";
 import { trackEvent } from "../analytics";
-import { isHandToolActive } from "../appState";
 import { TunnelsContext, useInitializeTunnels } from "../context/tunnels";
 import { UIAppStateContext } from "../context/ui-appState";
 import { useAtom, useAtomValue } from "../editor-jotai";
@@ -46,9 +44,9 @@ import Footer from "./footer/Footer";
 import { isSidebarDockedAtom } from "./Sidebar/Sidebar";
 import MainMenu from "./main-menu/MainMenu";
 import { ActiveConfirmDialog } from "./ActiveConfirmDialog";
-import { useDevice } from "./App";
+import { useEditorInterface, useStylesPanelMode } from "./App";
 import { OverwriteConfirmDialog } from "./OverwriteConfirm/OverwriteConfirm";
-import { LibraryIcon } from "./icons";
+import { sidebarRightIcon } from "./icons";
 import { DefaultSidebar } from "./DefaultSidebar";
 import { TTDDialog } from "./TTDDialog/TTDDialog";
 import { Stats } from "./Stats";
@@ -56,13 +54,13 @@ import ElementLinkDialog from "./ElementLinkDialog";
 import { ErrorDialog } from "./ErrorDialog";
 import { EyeDropper, activeEyeDropperAtom } from "./EyeDropper";
 import { FixedSideContainer } from "./FixedSideContainer";
-import { HandButton } from "./HandButton";
 import { HelpDialog } from "./HelpDialog";
 import { HintViewer } from "./HintViewer";
 import { ImageExportDialog } from "./ImageExportDialog";
 import { Island } from "./Island";
 import { JSONExportDialog } from "./JSONExportDialog";
 import { LaserPointerButton } from "./LaserPointerButton";
+import { Toast } from "./Toast";
 
 import "./LayerUI.scss";
 import "./Toolbar.scss";
@@ -91,6 +89,7 @@ interface LayerUIProps {
   onPenModeToggle: AppClassProperties["togglePenMode"];
   showExitZenModeBtn: boolean;
   langCode: Language["code"];
+  renderTopLeftUI?: ExcalidrawProps["renderTopLeftUI"];
   renderTopRightUI?: ExcalidrawProps["renderTopRightUI"];
   renderCustomStats?: ExcalidrawProps["renderCustomStats"];
   UIOptions: AppProps["UIOptions"];
@@ -123,7 +122,7 @@ const DefaultMainMenu: React.FC<{
         <MainMenu.DefaultItems.Socials />
       </MainMenu.Group>
       <MainMenu.Separator />
-      <MainMenu.DefaultItems.ToggleTheme />
+      <MainMenu.DefaultItems.ToggleTheme allowSystemTheme={false} />
       <MainMenu.DefaultItems.ChangeCanvasBackground />
     </MainMenu>
   );
@@ -149,6 +148,7 @@ const LayerUI = ({
   onHandToolToggle,
   onPenModeToggle,
   showExitZenModeBtn,
+  renderTopLeftUI,
   renderTopRightUI,
   renderCustomStats,
   UIOptions,
@@ -159,27 +159,28 @@ const LayerUI = ({
   isCollaborating,
   generateLinkForSelection,
 }: LayerUIProps) => {
-  const device = useDevice();
+  const editorInterface = useEditorInterface();
+  const stylesPanelMode = useStylesPanelMode();
+  const isCompactStylesPanel = stylesPanelMode === "compact";
   const tunnels = useInitializeTunnels();
 
-  const spacing =
-    appState.stylesPanelMode === "compact"
-      ? {
-          menuTopGap: 4,
-          toolbarColGap: 4,
-          toolbarRowGap: 1,
-          toolbarInnerRowGap: 0.5,
-          islandPadding: 1,
-          collabMarginLeft: 8,
-        }
-      : {
-          menuTopGap: 6,
-          toolbarColGap: 4,
-          toolbarRowGap: 1,
-          toolbarInnerRowGap: 1,
-          islandPadding: 1,
-          collabMarginLeft: 8,
-        };
+  const spacing = isCompactStylesPanel
+    ? {
+        menuTopGap: 4,
+        toolbarColGap: 4,
+        toolbarRowGap: 1,
+        toolbarInnerRowGap: 0.5,
+        islandPadding: 1,
+        collabMarginLeft: 8,
+      }
+    : {
+        menuTopGap: 6,
+        toolbarColGap: 4,
+        toolbarRowGap: 1,
+        toolbarInnerRowGap: 1,
+        islandPadding: 1,
+        collabMarginLeft: 8,
+      };
 
   const TunnelsJotaiProvider = tunnels.tunnelsJotai.Provider;
 
@@ -234,7 +235,7 @@ const LayerUI = ({
   );
 
   const renderSelectedShapeActions = () => {
-    const isCompactMode = appState.stylesPanelMode === "compact";
+    const isCompactMode = isCompactStylesPanel;
 
     return (
       <Section
@@ -306,7 +307,7 @@ const LayerUI = ({
             <div
               className={clsx("selected-shape-actions-container", {
                 "selected-shape-actions-container--compact":
-                  appState.stylesPanelMode === "compact",
+                  isCompactStylesPanel,
               })}
             >
               {shouldRenderSelectedShapeActions && renderSelectedShapeActions()}
@@ -331,14 +332,13 @@ const LayerUI = ({
                           padding={spacing.islandPadding}
                           className={clsx("App-toolbar", {
                             "zen-mode": appState.zenModeEnabled,
-                            "App-toolbar--compact":
-                              appState.stylesPanelMode === "compact",
+                            "App-toolbar--compact": isCompactStylesPanel,
                           })}
                         >
                           <HintViewer
                             appState={appState}
-                            isMobile={device.editor.isMobile}
-                            device={device}
+                            isMobile={editorInterface.formFactor === "phone"}
+                            editorInterface={editorInterface}
                             app={app}
                           />
                           {heading}
@@ -358,15 +358,8 @@ const LayerUI = ({
 
                             <div className="App-toolbar__divider" />
 
-                            <HandButton
-                              checked={isHandToolActive(appState)}
-                              onChange={() => onHandToolToggle()}
-                              title={t("toolBar.hand")}
-                              isMobile
-                            />
-
                             <ShapesSwitcher
-                              appState={appState}
+                              setAppState={setAppState}
                               activeTool={appState.activeTool}
                               UIOptions={UIOptions}
                               app={app}
@@ -404,8 +397,7 @@ const LayerUI = ({
               "layer-ui__wrapper__top-right zen-mode-transition",
               {
                 "transition-right": appState.zenModeEnabled,
-                "layer-ui__wrapper__top-right--compact":
-                  appState.stylesPanelMode === "compact",
+                "layer-ui__wrapper__top-right--compact": isCompactStylesPanel,
               },
             )}
           >
@@ -415,7 +407,10 @@ const LayerUI = ({
                 userToFollow={appState.userToFollow?.socketId || null}
               />
             )}
-            {renderTopRightUI?.(device.editor.isMobile, appState)}
+            {renderTopRightUI?.(
+              editorInterface.formFactor === "phone",
+              appState,
+            )}
             {!appState.viewModeEnabled &&
               appState.openDialog?.name !== "elementLinkSelector" &&
               // hide button when sidebar docked
@@ -446,7 +441,9 @@ const LayerUI = ({
           trackEvent(
             "sidebar",
             `toggleDock (${docked ? "dock" : "undock"})`,
-            `(${device.editor.isMobile ? "mobile" : "desktop"})`,
+            `(${
+              editorInterface.formFactor === "phone" ? "mobile" : "desktop"
+            })`,
           );
         }}
       />
@@ -467,23 +464,21 @@ const LayerUI = ({
       <DefaultMainMenu UIOptions={UIOptions} />
       <DefaultSidebar.Trigger
         __fallback
-        icon={LibraryIcon}
+        icon={sidebarRightIcon}
         title={capitalizeString(t("toolBar.library"))}
         onToggle={(open) => {
           if (open) {
             trackEvent(
               "sidebar",
               `${DEFAULT_SIDEBAR.name} (open)`,
-              `button (${device.editor.isMobile ? "mobile" : "desktop"})`,
+              `button (${
+                editorInterface.formFactor === "phone" ? "mobile" : "desktop"
+              })`,
             );
           }
         }}
         tab={DEFAULT_SIDEBAR.defaultTab}
-      >
-        {appState.stylesPanelMode === "full" &&
-          appState.width >= MQ_MIN_WIDTH_DESKTOP &&
-          t("toolBar.library")}
-      </DefaultSidebar.Trigger>
+      />
       <DefaultOverwriteConfirmDialog />
       {appState.openDialog?.name === "ttd" && <TTDDialog __fallback />}
       {/* ------------------------------------------------------------------ */}
@@ -494,7 +489,7 @@ const LayerUI = ({
           {appState.errorMessage}
         </ErrorDialog>
       )}
-      {eyeDropperState && !device.editor.isMobile && (
+      {eyeDropperState && editorInterface.formFactor !== "phone" && (
         <EyeDropper
           colorPickerType={eyeDropperState.colorPickerType}
           onCancel={() => {
@@ -562,18 +557,18 @@ const LayerUI = ({
       <tunnels.OverwriteConfirmDialogTunnel.Out />
       {renderImageExportDialog()}
       {renderJSONExportDialog()}
-      {appState.pasteDialog.shown && (
+      {appState.openDialog?.name === "charts" && (
         <PasteChartDialog
-          setAppState={setAppState}
-          appState={appState}
+          data={appState.openDialog.data}
+          rawText={appState.openDialog.rawText}
           onClose={() =>
             setAppState({
-              pasteDialog: { shown: false, data: null },
+              openDialog: null,
             })
           }
         />
       )}
-      {device.editor.isMobile && (
+      {editorInterface.formFactor === "phone" && (
         <MobileMenu
           app={app}
           appState={appState}
@@ -582,25 +577,23 @@ const LayerUI = ({
           renderJSONExportDialog={renderJSONExportDialog}
           renderImageExportDialog={renderImageExportDialog}
           setAppState={setAppState}
-          onLockToggle={onLockToggle}
           onHandToolToggle={onHandToolToggle}
           onPenModeToggle={onPenModeToggle}
+          renderTopLeftUI={renderTopLeftUI}
           renderTopRightUI={renderTopRightUI}
-          renderCustomStats={renderCustomStats}
           renderSidebars={renderSidebars}
-          device={device}
           renderWelcomeScreen={renderWelcomeScreen}
           UIOptions={UIOptions}
         />
       )}
-      {!device.editor.isMobile && (
+      {editorInterface.formFactor !== "phone" && (
         <>
           <div
             className="layer-ui__wrapper"
             style={
               appState.openSidebar &&
               isSidebarDocked &&
-              device.editor.canFitSidebar
+              editorInterface.canFitSidebar
                 ? { width: `calc(100% - var(--right-sidebar-width))` }
                 : {}
             }
@@ -613,18 +606,30 @@ const LayerUI = ({
               showExitZenModeBtn={showExitZenModeBtn}
               renderWelcomeScreen={renderWelcomeScreen}
             />
-            {appState.scrolledOutside && (
-              <button
-                type="button"
-                className="scroll-back-to-content"
-                onClick={() => {
-                  setAppState((appState) => ({
-                    ...calculateScrollCenter(elements, appState),
-                  }));
-                }}
-              >
-                {t("buttons.scrollBackToContent")}
-              </button>
+            {(appState.toast || appState.scrolledOutside) && (
+              <div className="floating-status-stack">
+                {appState.toast && (
+                  <Toast
+                    message={appState.toast.message}
+                    onClose={() => setAppState({ toast: null })}
+                    duration={appState.toast.duration}
+                    closable={appState.toast.closable}
+                  />
+                )}
+                {!appState.toast && appState.scrolledOutside && (
+                  <button
+                    type="button"
+                    className="scroll-back-to-content"
+                    onClick={() => {
+                      setAppState((appState) => ({
+                        ...calculateScrollCenter(elements, appState),
+                      }));
+                    }}
+                  >
+                    {t("buttons.scrollBackToContent")}
+                  </button>
+                )}
+              </div>
             )}
           </div>
           {renderSidebars()}
@@ -645,14 +650,7 @@ const LayerUI = ({
 };
 
 const stripIrrelevantAppStateProps = (appState: AppState): UIAppState => {
-  const {
-    suggestedBindings,
-    startBoundElement,
-    cursorButton,
-    scrollX,
-    scrollY,
-    ...ret
-  } = appState;
+  const { cursorButton, scrollX, scrollY, ...ret } = appState;
   return ret;
 };
 

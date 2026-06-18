@@ -7,7 +7,6 @@ import {
   MIN_ZOOM,
   THEME,
   ZOOM_STEP,
-  getShortcutKey,
   updateActiveTool,
   CODES,
   KEYS,
@@ -46,12 +45,13 @@ import { t } from "../i18n";
 import { getNormalizedZoom } from "../scene";
 import { centerScrollOn } from "../scene/scroll";
 import { getStateForZoom } from "../scene/zoom";
+import { getShortcutKey } from "../shortcut";
 
 import { register } from "./register";
 
 import type { AppState, Offsets } from "../types";
 
-export const actionChangeViewBackgroundColor = register({
+export const actionChangeViewBackgroundColor = register<Partial<AppState>>({
   name: "changeViewBackgroundColor",
   label: "labels.canvasBackground",
   trackEvent: false,
@@ -64,7 +64,7 @@ export const actionChangeViewBackgroundColor = register({
   perform: (_, appState, value) => {
     return {
       appState: { ...appState, ...value },
-      captureUpdate: !!value.viewBackgroundColor
+      captureUpdate: !!value?.viewBackgroundColor
         ? CaptureUpdateAction.IMMEDIATELY
         : CaptureUpdateAction.EVENTUALLY,
     };
@@ -83,7 +83,6 @@ export const actionChangeViewBackgroundColor = register({
         elements={elements}
         appState={appState}
         updateData={updateData}
-        compactMode={appState.stylesPanelMode === "compact"}
       />
     );
   },
@@ -119,10 +118,12 @@ export const actionClearCanvas = register({
         gridStep: appState.gridStep,
         gridModeEnabled: appState.gridModeEnabled,
         stats: appState.stats,
-        pasteDialog: appState.pasteDialog,
         activeTool:
           appState.activeTool.type === "image"
-            ? { ...appState.activeTool, type: app.defaultSelectionTool }
+            ? {
+                ...appState.activeTool,
+                type: app.state.preferredSelectionTool.type,
+              }
             : appState.activeTool,
       },
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
@@ -464,7 +465,7 @@ export const actionZoomToFit = register({
     !event[KEYS.CTRL_OR_CMD],
 });
 
-export const actionToggleTheme = register({
+export const actionToggleTheme = register<AppState["theme"]>({
   name: "toggleTheme",
   label: (_, appState) => {
     return appState.theme === THEME.DARK
@@ -472,20 +473,32 @@ export const actionToggleTheme = register({
       : "buttons.darkMode";
   },
   keywords: ["toggle", "dark", "light", "mode", "theme"],
-  icon: (appState) => (appState.theme === THEME.LIGHT ? MoonIcon : SunIcon),
+  icon: (appState, elements) =>
+    appState.theme === THEME.LIGHT ? MoonIcon : SunIcon,
   viewMode: true,
   trackEvent: { category: "canvas" },
-  perform: (_, appState, value) => {
+  perform: (_, appState, value, app) => {
+    const nextTheme =
+      value || (appState.theme === THEME.LIGHT ? THEME.DARK : THEME.LIGHT);
+
+    if (app.props.onThemeChange) {
+      app.props.onThemeChange(nextTheme);
+      return false;
+    }
+
     return {
       appState: {
         ...appState,
-        theme:
-          value || (appState.theme === THEME.LIGHT ? THEME.DARK : THEME.LIGHT),
+        theme: nextTheme,
       },
       captureUpdate: CaptureUpdateAction.EVENTUALLY,
     };
   },
-  keyTest: (event) => event.altKey && event.shiftKey && event.code === CODES.D,
+  keyTest: (event) =>
+    !event[KEYS.CTRL_OR_CMD] &&
+    event.altKey &&
+    event.shiftKey &&
+    event.code === CODES.D,
   predicate: (elements, appState, props, app) => {
     return !!app.props.UIOptions.canvasActions.toggleTheme;
   },
@@ -501,7 +514,7 @@ export const actionToggleEraserTool = register({
     if (isEraserActive(appState)) {
       activeTool = updateActiveTool(appState, {
         ...(appState.activeTool.lastActiveTool || {
-          type: app.defaultSelectionTool,
+          type: app.state.preferredSelectionTool.type,
         }),
         lastActiveToolBeforeEraser: null,
       });
@@ -532,7 +545,7 @@ export const actionToggleLassoTool = register({
   icon: LassoIcon,
   trackEvent: { category: "toolbar" },
   predicate: (elements, appState, props, app) => {
-    return app.defaultSelectionTool !== "lasso";
+    return app.state.preferredSelectionTool.type !== "lasso";
   },
   perform: (elements, appState, _, app) => {
     let activeTool: AppState["activeTool"];

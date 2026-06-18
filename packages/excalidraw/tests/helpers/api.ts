@@ -19,9 +19,10 @@ import {
   newTextElement,
 } from "@excalidraw/element";
 
-import { isLinearElementType } from "@excalidraw/element";
-import { getSelectedElements } from "@excalidraw/element";
+import { isUsingAdaptiveRadius, getSelectedElements } from "@excalidraw/element";
 import { selectGroupsForSelectedElements } from "@excalidraw/element";
+
+import { FONT_SIZES } from "@excalidraw/common";
 
 import type {
   ExcalidrawElement,
@@ -265,9 +266,9 @@ export class API {
           : rest.roundness
       )
         ? {
-            type: isLinearElementType(type)
-              ? ROUNDNESS.PROPORTIONAL_RADIUS
-              : ROUNDNESS.ADAPTIVE_RADIUS,
+            type: isUsingAdaptiveRadius(type)
+                    ? ROUNDNESS.ADAPTIVE_RADIUS
+                    : ROUNDNESS.PROPORTIONAL_RADIUS,
           }
         : null,
       roughness: rest.roughness ?? appState.currentItemRoughness,
@@ -406,7 +407,7 @@ export class API {
       text: opts?.label?.text || "sample-text",
       width: 50,
       height: 20,
-      fontSize: 16,
+      fontSize: FONT_SIZES.sm,
       containerId: rectangle.id,
       frameId:
         opts?.label?.frameId === undefined
@@ -464,7 +465,7 @@ export class API {
   static readFile = async <T extends "utf8" | null>(
     filepath: string,
     encoding?: T,
-  ): Promise<T extends "utf8" ? string : Buffer> => {
+  ): Promise<T extends "utf8" ? string : ArrayBuffer> => {
     filepath = path.isAbsolute(filepath)
       ? filepath
       : path.resolve(path.join(__dirname, "../", filepath));
