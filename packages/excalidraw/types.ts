@@ -159,6 +159,7 @@ export type ToolType =
   | "hand"
   | "frame"
   | "magicframe"
+  | "stickynote"
   | "embeddable"
   | "laser"
   | "autoshape"
@@ -280,6 +281,12 @@ export type ObservedElementsAppState = {
 export type BoxSelectionMode = "contain" | "overlap";
 
 /**
+ * The pointing device the wheel mappings are tuned for. `auto` is reserved
+ * for detecting it from the wheel events; see `resolveInputDevice`.
+ */
+export type InputDevice = "auto" | "mouse" | "trackpad";
+
+/**
  * A box, in scene coordinates, that pan & zoom are constrained to.
  *
  * This is a private type. For public API, only use specific properties,
@@ -360,6 +367,13 @@ export interface AppState {
   /** user preference whether arrow snap to midpoints while binding */
   isMidpointSnappingEnabled: boolean;
   /**
+   * user preference for what the wheel does: with a `trackpad` a plain wheel
+   * pans and ctrl/cmd+wheel (how a pinch is delivered) zooms; with a `mouse`
+   * a plain wheel zooms and ctrl/cmd+wheel pans vertically. `auto` resolves
+   * to `trackpad` until device detection exists — see `resolveInputDevice`
+   */
+  inputDevice: InputDevice;
+  /**
    * The bindable element the UI highlights for the user when an arrow is
    * dragged or otherwise its endpoint being close to said element.
    */
@@ -416,6 +430,8 @@ export interface AppState {
   exportWithDarkMode: boolean;
   exportScale: number;
   currentItemStrokeColor: string;
+  currentItemStickynoteStrokeColor: string;
+  currentItemStickynoteBackgroundColor: string;
   currentItemBackgroundColor: string;
   currentItemFillStyle: ExcalidrawElement["fillStyle"];
   currentItemStrokeWidthKey: StrokeWidthKey;
@@ -536,6 +552,20 @@ export interface AppState {
   // a drag operation (like pointer position vs bindable element) but needed
   // globally for calculating the binding strategy
   bindMode: BindMode;
+  /** user-customized color-picker top picks (pinned via drag & drop from the
+   * color picker popup). `null` means no customization (defaults, or
+   * host-supplied `topPicks`, are used). Kept per picker. */
+  colorTopPicks: {
+    elementStroke: readonly string[] | null;
+    elementBackground: readonly string[] | null;
+    /** the bucket-fill tool keeps a list separate from `elementBackground`
+     * even though both drive `currentItemBackgroundColor` (its defaults and
+     * use case differ — no transparent) */
+    bucketFill: readonly string[] | null;
+    /** sticky notes are their own color domain (own defaults, own picks) */
+    stickyNoteStroke: readonly string[] | null;
+    stickyNoteBackground: readonly string[] | null;
+  };
 }
 
 export type SearchMatch = {
@@ -770,6 +800,16 @@ export type UIConfig = {
 
 export interface ExcalidrawProps {
   className?: string;
+  /**
+   * Document that owns Excalidraw's mounted DOM.
+   *
+   * Set only when it differs from the global `document`, such as when code
+   * executing in a parent window mounts Excalidraw into an iframe document.
+   * The value must remain stable for the editor's lifetime.
+   *
+   * @default document
+   */
+  ownerDocument?: Document;
   onChange?: (
     elements: readonly OrderedExcalidrawElement[],
     appState: AppState,
@@ -996,7 +1036,8 @@ export interface ExcalidrawProps {
 }
 
 export type SceneData = {
-  elements?: ImportedDataState["elements"];
+  /** Expects normalized elements; restore imported data before updating the scene. */
+  elements?: readonly ExcalidrawElement[] | null;
   appState?: ImportedDataState["appState"];
   collaborators?: Map<SocketId, Collaborator>;
   captureUpdate?: CaptureUpdateActionType;
@@ -1082,6 +1123,8 @@ export type AppProps = Merge<
 export type AppClassProperties = {
   props: AppProps;
   state: AppState;
+  readonly ownerDocument: Document;
+  readonly ownerWindow: Window & typeof globalThis;
   api: App["api"];
   sessionExportThemeOverride: App["sessionExportThemeOverride"];
   interactiveCanvas: HTMLCanvasElement | null;
@@ -1118,8 +1161,11 @@ export type AppClassProperties = {
   dismissLinearEditor: App["dismissLinearEditor"];
   flowchart: App["flowchart"];
   drawShape: App["drawShape"];
+  arrowText: App["arrowText"];
   cursor: App["cursor"];
   bucketFill: App["bucketFill"];
+  toolDrag: App["toolDrag"];
+  activeResizeHandle: App["activeResizeHandle"];
   isToolLocked: App["isToolLocked"];
   getEffectiveGridSize: App["getEffectiveGridSize"];
   setPlugins: App["setPlugins"];
@@ -1186,6 +1232,9 @@ export type PointerDownState = Readonly<{
     // elements, which is useful for discriminating between selecitng
     // the entire selection vs a specific element
     hasHitCommonBoundingBoxOfSelectedElements: boolean;
+    // Whether the pointer went down on the selected arrow's label, which
+    // makes the gesture a label drag along the arrow rather than a point drag
+    arrowLabel: boolean;
   };
   // This is determined on the initial pointer down event to
   // set various interaction modalities
@@ -1364,6 +1413,12 @@ export type NullableGridSize =
 export type GenerateDiagramToCode = (props: {
   frame: NonDeleted<ExcalidrawMagicFrameElement>;
   children: readonly NonDeletedExcalidrawElement[];
+  /**
+   * Optional streaming hook. Call with the accumulated response text as it
+   * streams in so the editor can progressively render the partial HTML
+   * inside the generated frame.
+   */
+  onPartial?: (html: string) => void;
 }) => MaybePromise<{ html: string }>;
 
 export type Offsets = Partial<{
