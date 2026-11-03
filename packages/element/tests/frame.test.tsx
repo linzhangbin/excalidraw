@@ -8,13 +8,14 @@ import { API } from "@excalidraw/excalidraw/tests/helpers/api";
 import { Keyboard, Pointer, UI } from "@excalidraw/excalidraw/tests/helpers/ui";
 import { getTextEditor } from "@excalidraw/excalidraw/tests/queries/dom";
 import {
+  act,
   getCloneByOrigId,
   render,
 } from "@excalidraw/excalidraw/tests/test-utils";
 
 import { getSelectedElements } from "@excalidraw/excalidraw/scene";
 
-import { elementOverlapsWithFrame } from "../src/frame";
+import { elementOverlapsWithFrame, shouldApplyFrameClip } from "../src/frame";
 
 import type {
   ExcalidrawElement,
@@ -154,6 +155,108 @@ describe("adding elements to frames", () => {
         arrayToMap(h.elements),
       ),
     ).toBe(true);
+  });
+
+  it("should add a group a new frame matches edge to edge", () => {
+    // a hair outside, as snapping the frame to it leaves it
+    const rects = [
+      [100 - 1e-8, 100],
+      [200, 100 + 1e-8],
+    ].map(([x, width]) =>
+      API.createElement({
+        type: "rectangle",
+        x,
+        y: 100,
+        width,
+        height: 100,
+        strokeWidth: 4,
+        groupIds: ["group"],
+      }),
+    );
+    API.setElements(rects);
+
+    act(() => h.app.setActiveTool({ type: "frame" }));
+    mouse.downAt(100, 100);
+    mouse.moveTo(300, 200);
+    mouse.up();
+
+    const newFrame = h.elements.find((el) => el.type === "frame");
+    expect(newFrame).toMatchObject({ x: 100, y: 100, width: 200 });
+    expect(
+      rects.map((rect) => h.elements.find((el) => el.id === rect.id)?.frameId),
+    ).toEqual([newFrame!.id, newFrame!.id]);
+  });
+
+  it("should add a group a resized frame matches edge to edge", () => {
+    // a hair outside, as snapping the frame to it leaves it
+    const rects = [
+      [160, 40],
+      [200, 50 + 1e-8],
+    ].map(([x, width]) =>
+      API.createElement({
+        type: "rectangle",
+        x,
+        y: 0,
+        width,
+        height: 100,
+        groupIds: ["group"],
+      }),
+    );
+    API.setElements([frame, ...rects]);
+
+    mouse.clickAt(0, 0);
+    mouse.downAt(frame.x + frame.width, frame.y + frame.height);
+    mouse.moveTo(250, 100);
+    mouse.up();
+
+    expect(
+      rects.map((rect) => h.elements.find((el) => el.id === rect.id)?.frameId),
+    ).toEqual([frame.id, frame.id]);
+  });
+
+  it("should clip a frame's child to it, even if inside it (but for its stroke)", () => {
+    const child = API.createElement({
+      type: "rectangle",
+      x: 1e-7,
+      y: 1e-7,
+      width: 150 - 2e-7,
+      height: 100 - 2e-7,
+      frameId: frame.id,
+    });
+    API.setElements([child, frame]);
+
+    expect(
+      shouldApplyFrameClip(
+        child,
+        frame as ExcalidrawFrameLikeElement,
+        h.state,
+        arrayToMap(h.elements),
+      ),
+    ).toBe(true);
+  });
+
+  it("should not clip a child dragged out of its frame", () => {
+    const child = API.createElement({
+      type: "rectangle",
+      x: 300,
+      width: 50,
+      height: 50,
+      frameId: frame.id,
+    });
+    API.setElements([child, frame]);
+
+    expect(
+      shouldApplyFrameClip(
+        child,
+        frame as ExcalidrawFrameLikeElement,
+        {
+          ...h.state,
+          selectedElementIds: { [child.id]: true },
+          selectedElementsAreBeingDragged: true,
+        },
+        arrayToMap(h.elements),
+      ),
+    ).toBe(false);
   });
 
   it("should not add a newly created element to a frame behind a non-frame element", () => {
@@ -333,6 +436,50 @@ describe("adding elements to frames", () => {
       otherFrameChild.id,
       createdElement?.id,
       frame.id,
+    ]);
+  });
+
+  it("should insert a newly created frame child below its frame despite deleted frame children above it", () => {
+    const frameChild = API.createElement({
+      id: "frameChild",
+      type: "rectangle",
+      x: 100,
+      y: 20,
+      width: 20,
+      height: 20,
+      frameId: frame.id,
+    });
+    const deletedFrameChild = API.createElement({
+      id: "deletedFrameChild",
+      type: "rectangle",
+      x: 100,
+      y: 60,
+      width: 20,
+      height: 20,
+      frameId: frame.id,
+      isDeleted: true,
+    });
+
+    API.setElements([frameChild, frame, deletedFrameChild]);
+
+    UI.clickTool("rectangle");
+    mouse.downAt(20, 20);
+    mouse.moveTo(40, 40);
+    mouse.upAt(40, 40);
+
+    const createdElement = h.elements.find(
+      (element) =>
+        element.id !== frame.id &&
+        element.id !== frameChild.id &&
+        element.id !== deletedFrameChild.id,
+    );
+
+    expect(createdElement?.frameId).toBe(frame.id);
+    expect(h.elements.map((element) => element.id)).toEqual([
+      frameChild.id,
+      createdElement?.id,
+      frame.id,
+      deletedFrameChild.id,
     ]);
   });
 
